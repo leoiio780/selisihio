@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alat Rekonsiliasi Data (Perbandingan ID)</title>
+    <title>Alat Rekonsiliasi Data (Perbandingan ID) - Optimized & Duplicates Handled</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -47,22 +47,31 @@
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Kolom Input Data -->
             <div class="space-y-8">
+                <!-- Data Sistem -->
                 <div class="bg-white p-6 rounded-xl shadow-md">
                     <h2 class="text-xl font-semibold mb-2">1. Tempel Data Sistem (Panel)</h2>
                     <p class="text-sm text-gray-500 mb-4">Salin 2 kolom (ID dan Nominal) dari Excel lalu tempel di sini.</p>
-                    <textarea id="sistem-data" class="textarea-data" placeholder="Contoh:&#10;123ad   50000&#10;456ef   75000&#10;789gh   20000&#10;123ad   50000  (ID Duplikat contoh)"></textarea>
+                    <textarea id="sistem-data" class="textarea-data" placeholder="Contoh:&#10;123ad   50000&#10;456ef   75000&#10;123ad   50000 &#10;123ad   60000 &#10;ID Dengan Spasi   100000"></textarea>
                 </div>
 
+                <!-- Data Manual -->
                 <div class="bg-white p-6 rounded-xl shadow-md">
                     <h2 class="text-xl font-semibold mb-2">2. Tempel Data Catatan Manual</h2>
                     <p class="text-sm text-gray-500 mb-4">Salin 2 kolom (ID dan Nominal) dari Excel lalu tempel di sini.</p>
-                    <textarea id="manual-data" class="textarea-data" placeholder="Contoh:&#10;123AD   49000  (salah nominal)&#10;456ef   75000  (sesuai)&#10;101ij   15000  (hanya di manual)&#10;123AD   50000  (ID Duplikat contoh)"></textarea>
+                    <textarea id="manual-data" class="textarea-data" placeholder="Contoh:&#10;123AD   49000&#10;456ef   75000&#10;123AD   50000&#10;101ij   15000&#10;ID DENGAN SPASI   100000"></textarea>
                 </div>
             </div>
 
+            <!-- Kolom Hasil Rekonsiliasi -->
             <div class="bg-white p-6 rounded-xl shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 border-b pb-2">3. Hasil Rekonsiliasi Otomatis</h2>
+                <div class="flex justify-end mb-4">
+                    <button id="download-csv" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out">
+                        Unduh Hasil (CSV)
+                    </button>
+                </div>
                 <div class="overflow-auto" style="max-height: 600px;">
                     <table class="w-full text-sm">
                         <thead>
@@ -76,60 +85,104 @@
                             </tr>
                         </thead>
                         <tbody id="hasil-rekon">
-                           <tr><td colspan="6" class="text-center p-8 text-gray-500">Silakan tempel data di kolom sebelah kiri untuk melihat hasilnya.</td></tr>
+                           <tr><td colspan="6" class="text-center p-8 text-gray-500">Silakan tempel data untuk memulai.</td></tr>
                         </tbody>
                     </table>
+                    <!-- Loading indicator for large datasets -->
+                    <div id="loading-indicator" class="hidden text-center text-gray-600 p-4">
+                        Memproses data... Harap tunggu sebentar.
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
+        // Array untuk menyimpan data hasil rekonsiliasi dalam format yang mudah diekspor
+        let reconciliationResults = [];
+
         // Fungsi untuk memformat angka menjadi format Rupiah
-        function formatRupiah(angka) {
+        function formatRupiah(angka, includeCurrency = true) {
             if (typeof angka === 'undefined' || angka === null || isNaN(angka)) {
                 return '-';
             }
-            return new Intl.NumberFormat('id-ID', {
-                style: 'currency',
-                currency: 'IDR',
-                minimumFractionDigits: 0
-            }).format(angka);
+            if (includeCurrency) {
+                return new Intl.NumberFormat('id-ID', {
+                    style: 'currency',
+                    currency: 'IDR',
+                    minimumFractionDigits: 0
+                }).format(angka);
+            } else {
+                return String(angka); // Menggunakan String() untuk menghindari masalah format
+            }
         }
         
-        // FUNGSI parseData DIUBAH: Sekarang mengembalikan array dari semua baris yang ditemukan
-        // Setiap baris akan berisi originalId, normalizedId, dan nominal.
+        // Fungsi parseData yang dioptimalkan untuk memproses teks baris per baris
         function parseData(text) {
-            const dataList = []; // Menggunakan array untuk menyimpan semua entri, termasuk duplikat
-            const lines = text.trim().split('\n').filter(line => line.trim() !== '');
-            lines.forEach(line => {
-                const parts = line.trim().split(/\s+/);
+            const dataList = []; 
+            let instanceCounter = 0; // Untuk membuat ID unik per baris input
+
+            let startIndex = 0;
+            let newlineIndex;
+            const len = text.length;
+
+            while (startIndex < len) {
+                newlineIndex = text.indexOf('\n', startIndex);
+                const endIndex = (newlineIndex === -1) ? len : newlineIndex;
+
+                let line = text.substring(startIndex, endIndex).trim();
+                
+                startIndex = endIndex + 1; 
+
+                if (line === '') {
+                    continue;
+                }
+
+                const parts = line.split(/\s+/); 
+                
                 if (parts.length >= 2) {
-                    const originalId = parts[0];
+                    const nominalPart = parts[parts.length - 1]; 
+                    const originalId = parts.slice(0, parts.length - 1).join(' ');
+                    
                     const normalizedId = originalId.toLowerCase();
-                    const nominal = parseFloat(parts[parts.length - 1].replace(/,/g, ''));
-                    if (normalizedId && !isNaN(nominal)) {
-                        dataList.push({ originalId: originalId, normalizedId: normalizedId, nominal: nominal });
+                    const nominal = parseFloat(nominalPart.replace(/,/g, '')); 
+
+                    if (originalId && !isNaN(nominal)) {
+                        dataList.push({ 
+                            originalId: originalId, 
+                            normalizedId: normalizedId, 
+                            nominal: nominal,
+                            _instanceId: `item_${instanceCounter++}`, // ID unik untuk instance baris ini
+                            _processed: false // Flag untuk melacak apakah instance ini sudah direkonsiliasi
+                        });
                     }
                 }
-            });
+            }
             return dataList;
         }
 
         // Fungsi utama untuk melakukan rekonsiliasi
-        function reconcileData() {
+        async function reconcileData() { 
             const sistemDataText = document.getElementById('sistem-data').value;
             const manualDataText = document.getElementById('manual-data').value;
-            
-            // Sekarang kita mendapatkan array dari parseData
-            const sistemDataList = parseData(sistemDataText);
-            const manualDataList = parseData(manualDataText);
-
             const hasilBody = document.getElementById('hasil-rekon');
-            hasilBody.innerHTML = ''; // Kosongkan tabel hasil
+            const loadingIndicator = document.getElementById('loading-indicator');
 
-            // Membuat Map untuk pencarian cepat, mengizinkan duplikat di sumber yang sama
-            // Kita akan menyimpan ARRAY dari objek di setiap kunci normalizedId
+            // Tampilkan pesan loading dan kosongkan tabel
+            hasilBody.innerHTML = ''; 
+            loadingIndicator.classList.remove('hidden'); 
+            document.getElementById('download-csv').disabled = true;
+            document.getElementById('download-csv').classList.add('opacity-50', 'cursor-not-allowed');
+
+            // Beri kesempatan browser untuk merender pesan loading sebelum komputasi berat
+            await new Promise(resolve => setTimeout(resolve, 0)); 
+
+            const sistemDataList = parseData(sistemDataText); 
+            const manualDataList = parseData(manualDataText); 
+
+            reconciliationResults = []; 
+
+            // Buat Map untuk pencarian cepat, Map menyimpan referensi ke objek dari dataList
             const sistemDataMap = new Map();
             sistemDataList.forEach(item => {
                 if (!sistemDataMap.has(item.normalizedId)) {
@@ -146,97 +199,156 @@
                 manualDataMap.get(item.normalizedId).push(item);
             });
 
-            // Mengumpulkan semua ID unik dari kedua sumber untuk menentukan baris hasil
-            const allNormalizedIds = new Set([...sistemDataMap.keys(), ...manualDataMap.keys()]);
-
-            if (allNormalizedIds.size === 0 && sistemDataList.length === 0 && manualDataList.length === 0) {
+            if (sistemDataList.length === 0 && manualDataList.length === 0) {
                  hasilBody.innerHTML = `<tr><td colspan="6" class="text-center p-8 text-gray-500">Tempel data untuk memulai.</td></tr>`;
+                 loadingIndicator.classList.add('hidden'); 
                  return;
             }
-            
-            // Mengelola entri yang "Hanya di Sistem" atau "Hanya di Manual"
-            // Ini penting karena jika ada duplikat dalam satu sumber, kita ingin menampilkannya
-            let processedIds = new Set(); // Untuk melacak ID yang sudah diproses di kedua sisi
 
-            // 1. Proses ID yang ada di sistem (termasuk duplikat internal)
+            document.getElementById('download-csv').disabled = false;
+            document.getElementById('download-csv').classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            let allRowsHtml = [];
+
+            // --- Fase 1: Mencoba mencocokkan setiap item sistem ---
             sistemDataList.forEach(sistemItem => {
-                const normalizedId = sistemItem.normalizedId;
-                if (!processedIds.has(`sistem_${normalizedId}_${sistemItem.nominal}`)) { // Hindari memproses entri yang sama persis lebih dari sekali jika ada duplikat di kedua sisi
-                    const manualEntries = manualDataMap.get(normalizedId);
-                    
-                    if (manualEntries && manualEntries.length > 0) {
-                        // Coba cari pasangan yang nominalnya sama persis
-                        let foundMatch = false;
-                        for (let i = 0; i < manualEntries.length; i++) {
-                            const manualItem = manualEntries[i];
-                            if (sistemItem.nominal === manualItem.nominal) {
-                                appendRow(sistemItem, manualItem, 'Sesuai', 'status-sesuai');
-                                processedIds.add(`sistem_${sistemItem.normalizedId}_${sistemItem.nominal}`);
-                                processedIds.add(`manual_${manualItem.normalizedId}_${manualItem.nominal}`);
-                                // Hapus manualItem dari array agar tidak diproses lagi
-                                manualEntries.splice(i, 1); 
-                                foundMatch = true;
-                                break;
-                            }
-                        }
-                        if (!foundMatch) {
-                            // Jika tidak ada match nominal, ambil entri manual pertama yang belum diproses untuk ditampilkan selisih
-                            const manualItemToCompare = manualEntries.shift(); // Ambil dan hapus yang pertama
-                            if (manualItemToCompare) {
-                                const selisih = sistemItem.nominal - manualItemToCompare.nominal;
-                                appendRow(sistemItem, manualItemToCompare, 'Ada Selisih', 'status-selisih', selisih);
-                                processedIds.add(`sistem_${sistemItem.normalizedId}_${sistemItem.nominal}`);
-                                processedIds.add(`manual_${manualItemToCompare.normalizedId}_${manualItemToCompare.nominal}`);
-                            } else {
-                                // Ini kasus di mana semua manual entries untuk ID ini sudah terpakai
-                                appendRow(sistemItem, null, 'Hanya di Sistem', 'status-tidak-ditemukan');
-                                processedIds.add(`sistem_${sistemItem.normalizedId}_${sistemItem.nominal}`);
-                            }
-                        }
-                    } else {
-                        // Hanya ada di sistem
-                        appendRow(sistemItem, null, 'Hanya di Sistem', 'status-tidak-ditemukan');
-                        processedIds.add(`sistem_${sistemItem.normalizedId}_${sistemItem.nominal}`);
+                // Pastikan item sistem ini belum diproses sebelumnya (jika ada logika di luar forEach ini yang memproses)
+                // Namun, karena kita mengiterasi sistemDataList secara langsung, setiap item akan diproses.
+                // Flag _processed akan digunakan untuk menandai pasangan agar tidak digunakan kembali.
+
+                const manualEntriesForId = manualDataMap.get(sistemItem.normalizedId) || [];
+                let matchedManualItem = null;
+
+                // 1. Prioritaskan pencarian nominal yang persis cocok, yang belum diproses
+                for (let i = 0; i < manualEntriesForId.length; i++) {
+                    const manualItem = manualEntriesForId[i];
+                    if (!manualItem._processed && sistemItem.nominal === manualItem.nominal) {
+                        matchedManualItem = manualItem;
+                        break; // Temukan yang pertama dan keluar
                     }
                 }
-            });
+                
+                // 2. Jika tidak ada nominal yang persis cocok, cari item manual apa pun yang belum diproses
+                if (!matchedManualItem) {
+                    for (let i = 0; i < manualEntriesForId.length; i++) {
+                        const manualItem = manualEntriesForId[i];
+                        if (!manualItem._processed) { // Temukan item manual pertama yang belum diproses
+                            matchedManualItem = manualItem;
+                            break; 
+                        }
+                    }
+                }
 
-            // 2. Proses ID yang tersisa di manualDataMap (yang belum dipasangkan)
-            manualDataList.forEach(manualItem => {
-                // Periksa apakah manualItem ini sudah diproses dari sisi sistem
-                if (!processedIds.has(`manual_${manualItem.normalizedId}_${manualItem.nominal}`)) {
-                    appendRow(null, manualItem, 'Hanya di Manual', 'status-tidak-ditemukan');
-                    processedIds.add(`manual_${manualItem.normalizedId}_${manualItem.nominal}`);
+                // Sekarang, proses item sistem saat ini berdasarkan apakah item manual cocok ditemukan
+                if (matchedManualItem) {
+                    const selisih = sistemItem.nominal - matchedManualItem.nominal;
+                    let keterangan = 'Ada Selisih';
+                    let statusClass = 'status-selisih';
+                    if (selisih === 0) {
+                        keterangan = 'Sesuai';
+                        statusClass = 'status-sesuai';
+                    }
+                    appendRow(sistemItem, matchedManualItem, keterangan, statusClass, selisih, allRowsHtml);
+                    sistemItem._processed = true; // Tandai item sistem ini sudah diproses
+                    matchedManualItem._processed = true; // Tandai item manual yang cocok ini sudah diproses
+                } else {
+                    // Jika tidak ada item manual yang cocok atau tersisa untuk instance ID sistem ini
+                    appendRow(sistemItem, null, 'Hanya di Sistem', 'status-tidak-ditemukan', null, allRowsHtml);
+                    sistemItem._processed = true; // Tandai item sistem ini sudah diproses
                 }
             });
 
-            // Fungsi helper untuk menambahkan baris ke tabel
-            function appendRow(sistemItem, manualItem, keterangan, statusClass, selisihOverride = null) {
-                const idSistem = sistemItem ? sistemItem.originalId : '-';
-                const idManual = manualItem ? manualItem.originalId : '-';
+            // --- Fase 2: Tambahkan item manual yang belum diproses ---
+            manualDataList.forEach(manualItem => {
+                // Jika item manual ini belum ditandai sebagai diproses dari fase 1 (yaitu, tidak ada pasangannya)
+                if (!manualItem._processed) {
+                    appendRow(null, manualItem, 'Hanya di Manual', 'status-tidak-ditemukan', null, allRowsHtml);
+                    manualItem._processed = true; // Tandai sebagai diproses sekarang
+                }
+            });
 
-                const nominalSistem = sistemItem ? sistemItem.nominal : undefined;
-                const nominalManual = manualItem ? manualItem.nominal : undefined;
+            // Injeksi semua baris HTML sekaligus ke DOM
+            hasilBody.innerHTML = allRowsHtml.join('');
 
-                const selisih = selisihOverride !== null ? selisihOverride : ((nominalSistem || 0) - (nominalManual || 0));
+            // Sembunyikan pesan loading
+            loadingIndicator.classList.add('hidden');
+        }
 
-                const newRow = `
-                    <tr class="border-b hover:bg-gray-50">
-                        <td class="p-2 font-medium ${!sistemItem ? 'text-gray-400' : ''}">${idSistem}</td>
-                        <td class="p-2 font-medium ${!manualItem ? 'text-gray-400' : ''}">${idManual}</td>
-                        <td class="p-2">${formatRupiah(nominalSistem)}</td>
-                        <td class="p-2">${formatRupiah(nominalManual)}</td>
-                        <td class="p-2 font-semibold ${selisih !== 0 ? 'text-red-600' : 'text-green-600'}">${formatRupiah(selisih)}</td>
-                        <td class="p-2"><span class="px-2 py-1 rounded-full font-semibold text-xs ${statusClass}">${keterangan}</span></td>
-                    </tr>
-                `;
-                hasilBody.innerHTML += newRow;
+        // Fungsi helper untuk menambahkan baris ke array HTML dan ke array reconciliationResults
+        function appendRow(sistemItem, manualItem, keterangan, statusClass, selisihOverride = null, rowsHtmlArray) {
+            const idSistem = sistemItem ? sistemItem.originalId : '-';
+            const idManual = manualItem ? manualItem.originalId : '-';
+
+            const nominalSistem = sistemItem ? sistemItem.nominal : undefined;
+            const nominalManual = manualItem ? manualItem.nominal : undefined;
+
+            const selisih = selisihOverride !== null ? selisihOverride : ((nominalSistem || 0) - (nominalManual || 0));
+
+            const newRowHtml = `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="p-2 font-medium ${!sistemItem ? 'text-gray-400' : ''}">${idSistem}</td>
+                    <td class="p-2 font-medium ${!manualItem ? 'text-gray-400' : ''}">${idManual}</td>
+                    <td class="p-2">${formatRupiah(nominalSistem)}</td>
+                    <td class="p-2">${formatRupiah(nominalManual)}</td>
+                    <td class="p-2 font-semibold ${selisih !== 0 ? 'text-red-600' : 'text-green-600'}">${formatRupiah(selisih)}</td>
+                    <td class="p-2"><span class="px-2 py-1 rounded-full font-semibold text-xs ${statusClass}">${keterangan}</span></td>
+                </tr>
+            `;
+            rowsHtmlArray.push(newRowHtml); 
+            
+            // Simpan data mentah ke dalam array untuk ekspor CSV
+            reconciliationResults.push({
+                idSistem: idSistem,
+                idManual: idManual,
+                nominalSistem: nominalSistem,
+                nominalManual: nominalManual,
+                selisih: selisih,
+                keterangan: keterangan
+            });
+        }
+
+        // Fungsi untuk mengunduh data sebagai CSV
+        function downloadCSV() {
+            if (reconciliationResults.length === 0) {
+                console.log('Tidak ada data untuk diunduh.'); // Menggunakan konsol, bukan alert()
+                return;
             }
+
+            const headers = ["ID Sistem", "ID Manual", "Nominal Sistem", "Nominal Manual", "Selisih", "Keterangan"];
+            
+            const csvRows = reconciliationResults.map(row => {
+                // Pastikan nilai dibungkus tanda kutip jika mengandung koma atau spasi
+                const idSistem = `"${row.idSistem}"`; 
+                const idManual = `"${row.idManual}"`;
+                // Format nominal tanpa simbol mata uang untuk CSV
+                const nominalSistem = formatRupiah(row.nominalSistem, false); 
+                const nominalManual = formatRupiah(row.nominalManual, false);
+                const selisih = formatRupiah(row.selisih, false);
+                const keterangan = `"${row.keterangan}"`;
+
+                return [idSistem, idManual, nominalSistem, nominalManual, selisih, keterangan].join(',');
+            });
+
+            const csvContent = [headers.join(','), ...csvRows].join('\n');
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'hasil_rekonsiliasi.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
         // Tambahkan event listener ke kedua textarea
         document.getElementById('sistem-data').addEventListener('input', reconcileData);
         document.getElementById('manual-data').addEventListener('input', reconcileData);
+        document.getElementById('download-csv').addEventListener('click', downloadCSV);
+
+        // Panggilan awal untuk mengatur status tombol saat halaman dimuat
+        reconcileData();
     </script>
 </body>
 </html>
