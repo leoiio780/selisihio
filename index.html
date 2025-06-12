@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alat Rekonsiliasi Data (Perbandingan ID)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .textarea-data {
+            width: 100%;
+            height: 250px;
+            padding: 12px;
+            border: 2px dashed #d1d5db;
+            border-radius: 8px;
+            background-color: #f9fafb;
+            font-family: monospace;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .textarea-data:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+        }
+        thead th {
+            background-color: #f3f4f6;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        /* Custom styles untuk status */
+        .status-sesuai { background-color: #dcfce7; color: #166534; }
+        .status-selisih { background-color: #fef9c3; color: #854d0e; }
+        .status-tidak-ditemukan { background-color: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 p-4 sm:p-6 md:p-8">
+
+    <div class="max-w-screen-xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-900">Alat Rekonsiliasi Data Massal</h1>
+            <p class="mt-2 text-lg text-gray-600">Bandingkan ID dan nominal berdampingan untuk validasi yang akurat.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Kolom Input Data -->
+            <div class="space-y-8">
+                <!-- Data Sistem -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <h2 class="text-xl font-semibold mb-2">1. Tempel Data Sistem (Panel)</h2>
+                    <p class="text-sm text-gray-500 mb-4">Salin 2 kolom (ID dan Nominal) dari Excel lalu tempel di sini.</p>
+                    <textarea id="sistem-data" class="textarea-data" placeholder="Contoh:&#10;123ad   50000&#10;456ef   75000&#10;789gh   20000"></textarea>
+                </div>
+
+                <!-- Data Manual -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <h2 class="text-xl font-semibold mb-2">2. Tempel Data Catatan Manual</h2>
+                    <p class="text-sm text-gray-500 mb-4">Salin 2 kolom (ID dan Nominal) dari Excel lalu tempel di sini.</p>
+                    <textarea id="manual-data" class="textarea-data" placeholder="Contoh:&#10;123AD   49000  (salah nominal)&#10;456ef   75000  (sesuai)&#10;101ij   15000  (hanya di manual)"></textarea>
+                </div>
+            </div>
+
+            <!-- Kolom Hasil Rekonsiliasi -->
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b pb-2">3. Hasil Rekonsiliasi Otomatis</h2>
+                <div class="overflow-auto" style="max-height: 600px;">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th class="p-2 text-left">ID Sistem</th>
+                                <th class="p-2 text-left">ID Manual</th>
+                                <th class="p-2 text-left">Nominal Sistem</th>
+                                <th class="p-2 text-left">Nominal Manual</th>
+                                <th class="p-2 text-left">Selisih</th>
+                                <th class="p-2 text-left">Keterangan</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hasil-rekon">
+                           <tr><td colspan="6" class="text-center p-8 text-gray-500">Silakan tempel data di kolom sebelah kiri untuk melihat hasilnya.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Fungsi untuk memformat angka menjadi format Rupiah
+        function formatRupiah(angka) {
+            if (typeof angka === 'undefined' || angka === null || isNaN(angka)) {
+                return '-';
+            }
+            return new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                minimumFractionDigits: 0
+            }).format(angka);
+        }
+        
+        // Fungsi untuk mem-parsing data dari textarea
+        // Sekarang menyimpan ID asli dan nominal
+        function parseData(text) {
+            const dataMap = new Map();
+            const lines = text.trim().split('\n').filter(line => line.trim() !== '');
+            lines.forEach(line => {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length >= 2) {
+                    const originalId = parts[0];
+                    const normalizedId = originalId.toLowerCase(); // Kunci untuk pencocokan
+                    const nominal = parseFloat(parts[parts.length - 1].replace(/,/g, ''));
+                    if (normalizedId && !isNaN(nominal)) {
+                        dataMap.set(normalizedId, { originalId: originalId, nominal: nominal });
+                    }
+                }
+            });
+            return dataMap;
+        }
+
+        // Fungsi utama untuk melakukan rekonsiliasi
+        function reconcileData() {
+            const sistemDataText = document.getElementById('sistem-data').value;
+            const manualDataText = document.getElementById('manual-data').value;
+            
+            const sistemDataMap = parseData(sistemDataText);
+            const manualDataMap = parseData(manualDataText);
+
+            const hasilBody = document.getElementById('hasil-rekon');
+            hasilBody.innerHTML = ''; 
+
+            // Menggabungkan semua kunci (ID yang sudah dinormalisasi) dari kedua sumber
+            const allIds = new Set([...sistemDataMap.keys(), ...manualDataMap.keys()]);
+            
+            if (allIds.size === 0) {
+                 hasilBody.innerHTML = `<tr><td colspan="6" class="text-center p-8 text-gray-500">Tempel data untuk memulai.</td></tr>`;
+                return;
+            }
+            
+            // Urutkan ID untuk tampilan yang konsisten
+            const sortedIds = Array.from(allIds).sort();
+
+            sortedIds.forEach(normalizedId => {
+                const sistemEntry = sistemDataMap.get(normalizedId);
+                const manualEntry = manualDataMap.get(normalizedId);
+
+                const idSistem = sistemEntry ? sistemEntry.originalId : '-';
+                const idManual = manualEntry ? manualEntry.originalId : '-';
+
+                const nominalSistem = sistemEntry ? sistemEntry.nominal : undefined;
+                const nominalManual = manualEntry ? manualEntry.nominal : undefined;
+
+                const selisih = (nominalSistem || 0) - (nominalManual || 0);
+
+                let keterangan = '';
+                let statusClass = '';
+
+                if (sistemEntry && manualEntry) { // Jika ada di kedua data
+                    if (selisih === 0) {
+                        keterangan = 'Sesuai';
+                        statusClass = 'status-sesuai';
+                    } else {
+                        keterangan = 'Ada Selisih';
+                        statusClass = 'status-selisih';
+                    }
+                } else if (sistemEntry && !manualEntry) { // Jika hanya ada di sistem
+                    keterangan = 'Hanya di Sistem';
+                    statusClass = 'status-tidak-ditemukan';
+                } else if (!sistemEntry && manualEntry) { // Jika hanya ada di manual
+                    keterangan = 'Hanya di Manual';
+                    statusClass = 'status-tidak-ditemukan';
+                }
+                
+                // Buat baris baru di tabel hasil dengan 6 kolom
+                const newRow = `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-2 font-medium ${!sistemEntry ? 'text-gray-400' : ''}">${idSistem}</td>
+                        <td class="p-2 font-medium ${!manualEntry ? 'text-gray-400' : ''}">${idManual}</td>
+                        <td class="p-2">${formatRupiah(nominalSistem)}</td>
+                        <td class="p-2">${formatRupiah(nominalManual)}</td>
+                        <td class="p-2 font-semibold ${selisih !== 0 ? 'text-red-600' : 'text-green-600'}">${formatRupiah(selisih)}</td>
+                        <td class="p-2"><span class="px-2 py-1 rounded-full font-semibold text-xs ${statusClass}">${keterangan}</span></td>
+                    </tr>
+                `;
+                hasilBody.innerHTML += newRow;
+            });
+        }
+
+        // Tambahkan event listener ke kedua textarea
+        document.getElementById('sistem-data').addEventListener('input', reconcileData);
+        document.getElementById('manual-data').addEventListener('input', reconcileData);
+    </script>
+</body>
+</html>
